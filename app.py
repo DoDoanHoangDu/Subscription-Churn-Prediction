@@ -8,10 +8,8 @@ from pathlib import Path
 import shap
 from PIL import Image
 
-# Page configuration
 st.set_page_config(
     page_title="Customer Churn Prediction",
-    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -19,7 +17,6 @@ st.set_page_config(
 BETA = 3
 THRESHOLD = 0.1452
 MODEL_PATH = "notebooks/output/churn_tree_model.pkl"
-TREE_PLOT_PATH = "notebooks/output/churn_tree_plot.png"
 
 EDGES = {
     "tenure": [0, 2, 6, 12, 19, 29, 40, 50, 61, 69, float("inf")],
@@ -27,12 +24,19 @@ EDGES = {
     "TotalCharges": [0, 84.44, 269.81, 543.95, 928.88, 1372.45, 2071.61, 3248.81, 4509.76, 5969.91, float("inf")]
 }
 
+RISK_SEGMENTS = {
+    "top_priority": {"min": 80, "max": 100, "label": "Top-Priority", "color": "#4a4a4a"},
+    "high": {"min": 50, "max": 80, "label": "High-Risk", "color": "#6b6b6b"},
+    "medium": {"min": 15, "max": 50, "label": "Medium-Risk", "color": "#8c8c8c"},
+    "low": {"min": 0, "max": 15, "label": "Low-Risk", "color": "#b0b0b0"}
+}
+
 st.markdown("""
     <style>
     .main-header {
-        font-size: 3rem;
+        font-size: 2.5rem;
         font-weight: bold;
-        color: #1f77b4;
+        color: #2c3e50;
         text-align: center;
         margin-bottom: 2rem;
     }
@@ -41,19 +45,32 @@ st.markdown("""
         border-radius: 10px;
         margin: 1rem 0;
     }
-    .churn-yes {
-        background-color: #ffcccc;
-        border: 2px solid #cc0000;
+    .segment-top-priority {
+        background-color: #3d3d3d;
+        border: 2px solid #1a1a1a;
+        color: #ffffff;
     }
-    .churn-no {
-        background-color: #ccffcc;
-        border: 2px solid #00cc00;
+    .segment-high {
+        background-color: #5a5a5a;
+        border: 2px solid #3d3d3d;
+        color: #ffffff;
+    }
+    .segment-medium {
+        background-color: #a0a0a0;
+        border: 2px solid #7a7a7a;
+        color: #1a1a1a;
+    }
+    .segment-low {
+        background-color: #d4d4d4;
+        border: 2px solid #b0b0b0;
+        color: #1a1a1a;
     }
     .metric-card {
-        background-color: #f0f2f6;
+        background-color: #f5f5f5;
         padding: 1rem;
         border-radius: 5px;
         text-align: center;
+        border: 1px solid #ddd;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -158,6 +175,17 @@ def predict_churn(model, data):
     
     return predictions, probs_calibrated * 100
 
+def get_risk_segment(probability):
+    """Classify customer into risk segment based on churn probability"""
+    if probability >= 80:
+        return "top_priority", "Top-Priority", "Immediate action required. Often month-to-month or low-tenure customers."
+    elif probability >= 50:
+        return "high", "High-Risk", "Proactive retention strategies recommended."
+    elif probability >= 15:
+        return "medium", "Medium-Risk", "Monitor and consider targeted engagement."
+    else:
+        return "low", "Low-Risk", "No immediate action needed. Continue quality service."
+
 def create_input_form():
     """Create input form for single prediction"""
     st.subheader("Enter Customer Information")
@@ -234,45 +262,31 @@ def create_input_form():
     return customer_data
 
 def display_prediction_result(prediction, probability):
-    """Display prediction result with styling"""
-    is_churn = prediction[0] == "Yes"
+    """Display prediction result with 4-level risk segmentation"""
+    prob_value = probability[0]
+    segment_key, segment_label, segment_action = get_risk_segment(prob_value)
     
-    if is_churn:
-        st.markdown(f"""
-        <div class="prediction-box churn-yes">
-            <h2 style="color: #cc0000; margin: 0;">HIGH CHURN RISK</h2>
-            <h3 style="margin-top: 1rem;">Churn Probability: {probability[0]:.2f}%</h3>
-            <p style="font-size: 1.1rem; margin-top: 1rem;">
-                This customer is likely to churn. Consider retention strategies.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class="prediction-box churn-no">
-            <h2 style="color: #00cc00; margin: 0;">LOW CHURN RISK</h2>
-            <h3 style="margin-top: 1rem;">Churn Probability: {probability[0]:.2f}%</h3>
-            <p style="font-size: 1.1rem; margin-top: 1rem;">
-                This customer is likely to stay. Continue providing quality service.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="prediction-box segment-{segment_key}">
+        <h2 style="margin: 0;">{segment_label.upper()} SEGMENT</h2>
+        <h3 style="margin-top: 1rem;">Churn Probability: {prob_value:.2f}%</h3>
+        <p style="font-size: 1.1rem; margin-top: 1rem;">{segment_action}</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Probability gauge
     fig, ax = plt.subplots(figsize=(8, 2))
-    colors = ['#00cc00', '#ffcc00', '#cc0000']
-    bounds = [0, 30, 70, 100]
+    colors = ['#d4d4d4', '#a0a0a0', '#5a5a5a', '#3d3d3d']
+    bounds = [0, 15, 50, 80, 100]
     cmap = plt.cm.colors.ListedColormap(colors)
     norm = plt.cm.colors.BoundaryNorm(bounds, cmap.N)
     
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), 
                       cax=ax, orientation='horizontal')
-    cb.set_label('Churn Risk Level', fontsize=12, weight='bold')
-    cb.set_ticks([15, 50, 85])
-    cb.set_ticklabels(['Low', 'Medium', 'High'])
+    cb.set_label('Risk Segment', fontsize=12, weight='bold')
+    cb.set_ticks([7.5, 32.5, 65, 90])
+    cb.set_ticklabels(['Low', 'Medium', 'High', 'Top-Priority'])
     
-    # Add marker for current probability
-    ax.axvline(x=probability[0]/100, color='black', linewidth=3, linestyle='--')
+    ax.axvline(x=prob_value/100, color='#e74c3c', linewidth=3, linestyle='--')
     
     st.pyplot(fig)
     plt.close()
@@ -324,7 +338,6 @@ def show_shap_explanation(model, data, feature_names):
             st.pyplot(fig)
             plt.close()
             
-            # Individual force plot for first prediction
             if len(data) == 1:
                 st.subheader("Detailed Prediction Breakdown")
                 fig, ax = plt.subplots(figsize=(12, 3))
@@ -337,33 +350,33 @@ def show_shap_explanation(model, data, feature_names):
         st.warning(f"Could not generate SHAP explanation: {str(e)}")
 
 def main():
-    # Header
-    st.markdown('<h1 class="main-header">📊 Customer Churn Prediction System</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">Customer Churn Prediction System</h1>', unsafe_allow_html=True)
     
     st.markdown("""
     This application predicts customer churn using a Decision Tree model trained on telecom customer data.
-    The model uses **calibrated probabilities** (β=3) and an **optimized threshold** (0.1452) to maximize recall.
+    Customers are segmented into four risk categories for prioritized retention actions.
     """)
     
-    # Load model
     try:
         model = load_model()
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
         st.stop()
     
-    # Sidebar
     with st.sidebar:
-        st.image("https://img.icons8.com/fluency/96/000000/combo-chart.png", width=80)
         st.title("Navigation")
         mode = st.radio("Select Mode:", 
-                       ["Single Prediction", 
-                        "Batch Prediction", 
-                        "Model Info",
-                        "Decision Tree"])
+                    ["Single Prediction", 
+                        "Batch Prediction"])
         
         st.markdown("---")
-        st.markdown("### Model Parameters")
+        st.markdown("### Risk Segments")
+        st.markdown("""
+        **Top-Priority** (>=80%)  
+        **High-Risk** (50-80%)  
+        **Medium-Risk** (15-50%)  
+        **Low-Risk** (<15%)
+        """)
         st.info(f"""
         **Threshold:** {THRESHOLD}  
         **Beta (Calibration):** {BETA}  
@@ -371,13 +384,6 @@ def main():
         **Class Weight (Churn):** 3:1
         """)
         
-        st.markdown("---")
-        st.markdown("### Performance Metrics")
-        st.success("""
-        **F2 Score:** 0.7482  
-        **Accuracy:** ~80%  
-        **Recall:** High (prioritized)
-        """)
     
     # Main content based on mode
     if mode == "Single Prediction":
@@ -385,18 +391,14 @@ def main():
         
         if st.button("Predict Churn", type="primary", use_container_width=True):
             with st.spinner("Processing..."):
-                # Preprocess
                 processed_data = preprocess_data(customer_data, model)
                 
-                # Predict
                 prediction, probability = predict_churn(model, processed_data)
                 
-                # Display results
                 st.markdown("---")
                 display_prediction_result(prediction, probability)
                 
-                # Show input summary
-                with st.expander("📋 View Customer Details"):
+                with st.expander("View Customer Details"):
                     st.dataframe(customer_data.T, use_container_width=True)
                 
                 # SHAP explanation
@@ -407,10 +409,9 @@ def main():
         st.subheader("Batch Prediction from CSV")
         st.markdown("Upload a CSV file with customer data to predict churn for multiple customers.")
         
-        # Sample file download
         col1, col2 = st.columns([3, 1])
         with col1:
-            st.info("💡 Your CSV should have the same format as the training data (Telco-Customer-Churn.csv)")
+            st.info("Your CSV should have the same format as the training data (Telco-Customer-Churn.csv)")
         with col2:
             if st.button("View Sample Format"):
                 sample_df = pd.read_csv("data/Telco-Customer-Churn.csv").head(3)
@@ -420,12 +421,10 @@ def main():
         
         if uploaded_file is not None:
             try:
-                # Read uploaded file
                 df = pd.read_csv(uploaded_file)
                 st.success(f"Loaded {len(df)} customers")
                 
-                # Show preview
-                with st.expander("👀 Preview Data"):
+                with st.expander("Preview Data"):
                     st.dataframe(df.head(10), use_container_width=True)
                 
                 if st.button("Predict All", type="primary"):
@@ -433,60 +432,81 @@ def main():
                         # Keep IDs if present
                         customer_ids = df['customerID'] if 'customerID' in df.columns else [f"CUST_{i}" for i in range(len(df))]
                         
-                        # Preprocess
                         processed_data = preprocess_data(df, model)
                         
-                        # Predict
                         predictions, probabilities = predict_churn(model, processed_data)
                         
-                        # Create results dataframe
                         results_df = pd.DataFrame({
                             'CustomerID': customer_ids,
                             'Churn_Prediction': predictions,
                             'Churn_Probability': probabilities
                         })
                         
-                        # Display results
                         st.markdown("---")
                         st.subheader("Prediction Results")
                         
-                        # Summary metrics
-                        col1, col2, col3 = st.columns(3)
+                        def assign_segment(prob):
+                            if prob >= 80:
+                                return "Top-Priority"
+                            elif prob >= 50:
+                                return "High-Risk"
+                            elif prob >= 15:
+                                return "Medium-Risk"
+                            else:
+                                return "Low-Risk"
+                        
+                        results_df['Risk_Segment'] = results_df['Churn_Probability'].apply(assign_segment)
+                        
+                        top_priority_count = (results_df['Risk_Segment'] == 'Top-Priority').sum()
+                        high_risk_count = (results_df['Risk_Segment'] == 'High-Risk').sum()
+                        medium_risk_count = (results_df['Risk_Segment'] == 'Medium-Risk').sum()
+                        low_risk_count = (results_df['Risk_Segment'] == 'Low-Risk').sum()
+                        
+                        col1, col2, col3, col4 = st.columns(4)
                         with col1:
                             st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                            st.metric("Total Customers", len(results_df))
+                            st.metric("Top-Priority (>=80%)", top_priority_count)
                             st.markdown('</div>', unsafe_allow_html=True)
                         with col2:
                             st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                            churn_count = (results_df['Churn_Prediction'] == 'Yes').sum()
-                            st.metric("Predicted Churners", churn_count)
+                            st.metric("High-Risk (50-80%)", high_risk_count)
                             st.markdown('</div>', unsafe_allow_html=True)
                         with col3:
                             st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                            churn_rate = (churn_count / len(results_df)) * 100
-                            st.metric("Churn Rate", f"{churn_rate:.1f}%")
+                            st.metric("Medium-Risk (15-50%)", medium_risk_count)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        with col4:
+                            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                            st.metric("Low-Risk (<15%)", low_risk_count)
                             st.markdown('</div>', unsafe_allow_html=True)
                         
-                        # Results table
-                        st.dataframe(results_df.style.apply(
-                            lambda x: ['background-color: #ffcccc' if v == 'Yes' else 'background-color: #ccffcc' 
-                                     for v in x], 
-                            subset=['Churn_Prediction']
+                        def style_segment(val):
+                            if val == 'Top-Priority':
+                                return 'background-color: #3d3d3d; color: white'
+                            elif val == 'High-Risk':
+                                return 'background-color: #5a5a5a; color: white'
+                            elif val == 'Medium-Risk':
+                                return 'background-color: #a0a0a0; color: black'
+                            else:
+                                return 'background-color: #d4d4d4; color: black'
+                        
+                        st.dataframe(results_df.style.applymap(
+                            style_segment, subset=['Risk_Segment']
                         ), use_container_width=True)
                         
-                        # Probability distribution
                         fig, ax = plt.subplots(figsize=(10, 4))
-                        ax.hist(probabilities, bins=30, color='steelblue', edgecolor='black', alpha=0.7)
-                        ax.axvline(x=THRESHOLD*100, color='red', linestyle='--', linewidth=2, label=f'Threshold ({THRESHOLD*100:.2f}%)')
+                        ax.hist(probabilities, bins=30, color='#5a6c7d', edgecolor='#2c3e50', alpha=0.8)
+                        ax.axvline(x=15, color='#7f8c8d', linestyle='--', linewidth=1.5, label='15%')
+                        ax.axvline(x=50, color='#5a5a5a', linestyle='--', linewidth=1.5, label='50%')
+                        ax.axvline(x=80, color='#2c3e50', linestyle='--', linewidth=1.5, label='80%')
                         ax.set_xlabel('Churn Probability (%)', fontsize=12)
                         ax.set_ylabel('Number of Customers', fontsize=12)
-                        ax.set_title('Distribution of Churn Probabilities', fontsize=14, weight='bold')
+                        ax.set_title('Distribution of Churn Probabilities by Risk Segment', fontsize=14, weight='bold')
                         ax.legend()
                         ax.grid(True, alpha=0.3)
                         st.pyplot(fig)
                         plt.close()
                         
-                        # Download results
                         csv = results_df.to_csv(index=False)
                         st.download_button(
                             label="Download Results as CSV",
@@ -499,158 +519,7 @@ def main():
             except Exception as e:
                 st.error(f"Error processing file: {str(e)}")
     
-    elif mode == "Model Info":
-        st.subheader("Model Information & Performance")
-        
-        tab1, tab2, tab3 = st.tabs(["Model Details", "Feature Importance", "Methodology"])
-        
-        with tab1:
-            st.markdown("### Decision Tree Classifier")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### Hyperparameters")
-                st.code("""
-Max Depth: 10
-Min Samples Split: 80
-Min Samples Leaf: 20
-Criterion: Gini
-Splitter: Best
-Class Weight: {No: 1, Yes: 3}
-                """)
-            
-            with col2:
-                st.markdown("#### Model Performance")
-                st.code("""
-Test F2 Score: 0.7482
-Test Accuracy: ~80%
-Best Threshold: 0.1452
-Calibration Beta: 3
-AUC-ROC: High
-                """)
-            
-            st.markdown("#### Training Data Split")
-            st.markdown("""
-            - **Training Set:** 60% (4,225 customers)
-            - **Validation Set:** 20% (1,408 customers)
-            - **Test Set:** 20% (1,409 customers)
-            - **Stratification:** Yes (maintains churn ratio)
-            """)
-            
-            st.markdown("#### Feature Engineering")
-            st.markdown("""
-            1. **Categorical Encoding:**
-               - Binary features: 0/1
-               - Services without subscription: -1
-               - Contract types: 0/1/2
-            
-            2. **Continuous Feature Binning:**
-               - Tenure: 10 bins based on training quantiles
-               - Monthly Charges: 10 bins based on training quantiles
-               - Total Charges: 10 bins based on training quantiles
-            
-            3. **Calibration:**
-               - Applied post-hoc probability calibration (β=3)
-               - Adjusts for class imbalance
-               - Improves probability estimates
-            """)
-        
-        with tab2:
-            st.markdown("### Feature Importance Analysis")
-            show_feature_importance(model, model.feature_names_in_)
-            
-            st.markdown("#### Top Contributing Features")
-            st.markdown("""
-            Based on the decision tree's split importance, the most influential features for predicting churn are:
-            
-            - **Tenure (binned):** How long the customer has been with the company
-            - **Contract Type:** Month-to-month customers churn more
-            - **Internet Service:** Fiber optic users show different patterns
-            - **Monthly Charges (binned):** Higher charges correlate with churn
-            - **Payment Method:** Electronic check users churn more
-            - **Tech Support:** Customers without support churn more
-            """)
-        
-        with tab3:
-            st.markdown("### Methodology")
-            
-            st.markdown("#### 1. Probability Calibration")
-            st.latex(r'''
-            p_{calibrated} = \frac{\frac{1}{\beta} \cdot p_{raw}}{\frac{1}{\beta} \cdot p_{raw} + (1 - p_{raw})}
-            ''')
-            st.markdown("""
-            Where β = 3 (ratio of class weights). This calibration:
-            - Adjusts for class imbalance
-            - Improves probability estimates
-            - Makes the model more conservative (higher recall)
-            """)
-            
-            st.markdown("#### 2. Threshold Optimization")
-            st.markdown("""
-            The threshold (0.1452) was selected by:
-            - Optimizing F2 score on validation set
-            - F2 score weighs recall 2× more than precision
-            - Business priority: Catch potential churners (high recall)
-            - Acceptable trade-off: Some false positives
-            """)
-            
-            st.markdown("#### 3. Why This Matters")
-            st.markdown("""
-            **High Recall Strategy:**
-            - Better to incorrectly flag some loyal customers (false positive)
-            - Than to miss actual churners (false negative)
-            - Allows proactive retention efforts
-            - Reduces revenue loss from churn
-            """)
     
-    else:  # Decision Tree visualization
-        st.subheader("Decision Tree Visualization")
-        
-        st.markdown("""
-        This is a visual representation of the trained decision tree. Each node shows:
-        - **Split condition:** The feature and threshold used
-        - **Gini impurity:** Measure of node purity
-        - **Samples:** Number of training samples
-        - **Value:** Distribution of [No Churn, Churn]
-        - **Class:** Majority class at that node
-        """)
-        
-        try:
-            if Path(TREE_PLOT_PATH).exists():
-                image = Image.open(TREE_PLOT_PATH)
-                st.image(image, caption="Decision Tree Structure", use_container_width=True)
-            else:
-                st.warning("Tree plot not found. Generate it from the notebook first.")
-                
-                if st.button("Generate Tree Plot Now"):
-                    with st.spinner("Generating tree visualization..."):
-                        from sklearn.tree import plot_tree
-                        fig, ax = plt.subplots(figsize=(200, 40))
-                        plot_tree(
-                            model,
-                            feature_names=model.feature_names_in_,
-                            class_names=[str(c) for c in model.classes_],
-                            filled=True,
-                            rounded=True,
-                            fontsize=12,
-                            ax=ax
-                        )
-                        plt.savefig(TREE_PLOT_PATH, dpi=100, bbox_inches='tight')
-                        plt.close()
-                        st.success("Tree plot generated!")
-                        st.rerun()
-        except Exception as e:
-            st.error(f"Error displaying tree: {str(e)}")
-        
-        st.markdown("---")
-        st.info("""
-        **How to Read the Tree:**
-        - Start at the top (root) node
-        - Follow the branches based on feature values
-        - Each split separates customers into groups
-        - Leaf nodes (bottom) contain the final predictions
-        - Color intensity indicates class confidence
-        """)
 
 if __name__ == "__main__":
     main()
